@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	calendar "google.golang.org/api/calendar/v3"
 )
 
 // getClient uses a Context and Config to retrieve a Token
@@ -24,11 +26,13 @@ func getClient(ctx context.Context, config *oauth2.Config) *http.Client {
 	if err != nil {
 		log.Fatalf("Unable to get path to cached credential file. %v", err)
 	}
+
 	tok, err := tokenFromFile(cacheFile)
 	if err != nil {
 		tok = getTokenFromWeb(config)
 		saveToken(cacheFile, tok)
 	}
+
 	return config.Client(ctx, tok)
 }
 
@@ -36,8 +40,7 @@ func getClient(ctx context.Context, config *oauth2.Config) *http.Client {
 // It returns the retrieved Token.
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Go to the following link in your browser then type the "+
-		"authorization code: \n%v\n", authURL)
+	fmt.Printf("Go to the following link in your browser then type the authorization code: \n%v\n", authURL)
 
 	var code string
 	if _, err := fmt.Scan(&code); err != nil {
@@ -48,6 +51,7 @@ func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 	if err != nil {
 		log.Fatalf("Unable to retrieve token from web %v", err)
 	}
+
 	return tok
 }
 
@@ -58,22 +62,26 @@ func tokenCacheFile() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	tokenCacheDir := filepath.Join(usr.HomeDir, ".credentials")
+
 	os.MkdirAll(tokenCacheDir, 0700)
-	return filepath.Join(tokenCacheDir,
-		url.QueryEscape("calendar-go-quickstart.json")), err
+
+	return filepath.Join(tokenCacheDir, url.QueryEscape("calendar-go-quickstart.json")), err
 }
 
 // tokenFromFile retrieves a Token from a given file path.
 // It returns the retrieved Token and any read error encountered.
 func tokenFromFile(file string) (*oauth2.Token, error) {
 	f, err := os.Open(file)
+	defer f.Close()
 	if err != nil {
 		return nil, err
 	}
+
 	t := &oauth2.Token{}
 	err = json.NewDecoder(f).Decode(t)
-	defer f.Close()
+
 	return t, err
 }
 
@@ -81,11 +89,13 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 // token in it.
 func saveToken(file string, token *oauth2.Token) {
 	fmt.Printf("Saving credential file to: %s\n", file)
+
 	f, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	defer f.Close()
 	if err != nil {
 		log.Fatalf("Unable to cache oauth token: %v", err)
 	}
-	defer f.Close()
+
 	json.NewEncoder(f).Encode(token)
 }
 
@@ -103,35 +113,68 @@ func main() {
 	if err != nil {
 		log.Fatalf("Unable to parse client secret file to config: %v", err)
 	}
-	client := getClient(ctx, config)
 
+	client := getClient(ctx, config)
 	srv, err := calendar.New(client)
 	if err != nil {
 		log.Fatalf("Unable to retrieve calendar Client %v", err)
 	}
 
-	t := time.Now().Format(time.RFC3339)
-	events, err := srv.Events.List("primary").ShowDeleted(false).
-		SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
-	if err != nil {
-		log.Fatalf("Unable to retrieve next ten of the user's events. %v", err)
+	list, err := srv.CalendarList.List().ShowHidden(false).Do()
+	if err != nil || list == nil {
+		log.Fatalf("Unable to retrieve user's calendars list. %v", err)
 	}
 
-	fmt.Println("Upcoming events:")
-	if len(events.Items) > 0 {
-		for _, i := range events.Items {
-			var when string
+	now := time.Now()
+
+	monthBegin := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format(time.RFC3339)
+	monthEnd := time.Date(now.Year(), now.Month()+1, 0, 23, 59, 59, 0, now.Location()).Format(time.RFC3339)
+	fmt.Println(monthBegin)
+	fmt.Println(monthEnd)
+
+	// weekBegin := time.Date(now.Year(), now.Month(), now.Day()-now.Weekday(), 0, 0, 0, 0, now.Location()).Format(time.RFC3339)
+	// weekEnd := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location()).Format(time.RFC3339)
+	// fmt.Println(weekBegin)
+	// fmt.Println(weekEnd)
+
+	for _, cal := range list.Items {
+		// fmt.Printf("%s%#v\n\n", strings.Repeat("=", 100), cal)
+
+		// events, err := srv.Events.List(cal.Id).ShowDeleted(false).SingleEvents(true).TimeMin(monthBegin).TimeMax(monthEnd).OrderBy("startTime").Do()
+		events, err := srv.Events.List(cal.Id).ShowDeleted(false).SingleEvents(true).TimeMin(monthBegin).TimeMax(monthEnd).OrderBy("startTime").Do()
+		if err != nil {
+			log.Fatalf("Unable to retrieve next ten of the user's events. %v", err)
+		}
+
+		for _, ev := range events.Items {
+			if !strings.HasPrefix(ev.Summary, "SolarWinds") {
+				continue
+			}
+
 			// If the DateTime is an empty string the Event is an all-day Event.
 			// So only Date is available.
-			if i.Start.DateTime != "" {
-				when = i.Start.DateTime
-			} else {
-				when = i.Start.Date
-			}
-			fmt.Printf("%s (%s)\n", i.Summary, when)
-		}
-	} else {
-		fmt.Printf("No upcoming events found.\n")
-	}
+			// var when string
+			// if ev.Start.DateTime != "" {
+			// 	when = ev.Start.DateTime
+			// } else {
+			// 	when = ev.Start.Date
+			// }
 
+			// fmt.Printf("%s (%s)\n%#v\n", ev.Summary, when, ev)
+
+			startTime, err := time.Parse(time.RFC3339, ev.Start.DateTime)
+			if err != nil {
+				fmt.Println(err)
+			}
+
+			endTime, err := time.Parse(time.RFC3339, ev.End.DateTime)
+			if err != nil {
+				fmt.Println(err)
+			}
+
+			fmt.Printf("%#v\n", ev.Summary)
+			fmt.Printf("%#v\n", endTime.Sub(startTime).Hours())
+			fmt.Println()
+		}
+	}
 }
