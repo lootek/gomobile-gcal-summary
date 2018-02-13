@@ -10,11 +10,11 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	"google.golang.org/api/sheets/v4"
 )
 
 // getClient uses a Context and Config to retrieve a Token
@@ -61,7 +61,7 @@ func tokenCacheFile() (string, error) {
 	tokenCacheDir := filepath.Join(usr.HomeDir, ".credentials")
 	os.MkdirAll(tokenCacheDir, 0700)
 	return filepath.Join(tokenCacheDir,
-		url.QueryEscape("sheets.googleapis.com-go-quickstart.json")), err
+		url.QueryEscape("calendar-go-quickstart.json")), err
 }
 
 // tokenFromFile retrieves a Token from a given file path.
@@ -98,34 +98,40 @@ func main() {
 	}
 
 	// If modifying these scopes, delete your previously saved credentials
-	// at ~/.credentials/sheets.googleapis.com-go-quickstart.json
-	config, err := google.ConfigFromJSON(b, "https://www.googleapis.com/auth/spreadsheets.readonly")
+	// at ~/.credentials/calendar-go-quickstart.json
+	config, err := google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
 	if err != nil {
 		log.Fatalf("Unable to parse client secret file to config: %v", err)
 	}
 	client := getClient(ctx, config)
 
-	srv, err := sheets.New(client)
+	srv, err := calendar.New(client)
 	if err != nil {
-		log.Fatalf("Unable to retrieve Sheets Client %v", err)
+		log.Fatalf("Unable to retrieve calendar Client %v", err)
 	}
 
-	// Prints the names and majors of students in a sample spreadsheet:
-	// https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
-	spreadsheetId := "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
-	readRange := "Class Data!A2:E"
-	resp, err := srv.Spreadsheets.Values.Get(spreadsheetId, readRange).Do()
+	t := time.Now().Format(time.RFC3339)
+	events, err := srv.Events.List("primary").ShowDeleted(false).
+		SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
 	if err != nil {
-		log.Fatalf("Unable to retrieve data from sheet. %v", err)
+		log.Fatalf("Unable to retrieve next ten of the user's events. %v", err)
 	}
 
-	if len(resp.Values) > 0 {
-		fmt.Println("Name, Major:")
-		for _, row := range resp.Values {
-			// Print columns A and E, which correspond to indices 0 and 4.
-			fmt.Printf("%s, %s\n", row[0], row[4])
+	fmt.Println("Upcoming events:")
+	if len(events.Items) > 0 {
+		for _, i := range events.Items {
+			var when string
+			// If the DateTime is an empty string the Event is an all-day Event.
+			// So only Date is available.
+			if i.Start.DateTime != "" {
+				when = i.Start.DateTime
+			} else {
+				when = i.Start.Date
+			}
+			fmt.Printf("%s (%s)\n", i.Summary, when)
 		}
 	} else {
-		fmt.Print("No data found.")
+		fmt.Printf("No upcoming events found.\n")
 	}
+
 }
