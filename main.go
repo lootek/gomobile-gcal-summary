@@ -127,21 +127,32 @@ func main() {
 
 	now := time.Now()
 
-	monthBegin := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Format(time.RFC3339)
-	monthEnd := time.Date(now.Year(), now.Month()+1, 0, 23, 59, 59, 0, now.Location()).Format(time.RFC3339)
-	fmt.Println(monthBegin)
-	fmt.Println(monthEnd)
+	monthBegin := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	monthEnd := time.Date(now.Year(), now.Month()+1, 0, 23, 59, 59, 0, now.Location())
+	fmt.Printf("%v - %v\n", monthBegin, monthEnd)
 
-	// weekBegin := time.Date(now.Year(), now.Month(), now.Day()-now.Weekday(), 0, 0, 0, 0, now.Location()).Format(time.RFC3339)
-	// weekEnd := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location()).Format(time.RFC3339)
-	// fmt.Println(weekBegin)
-	// fmt.Println(weekEnd)
+	weekday := int(now.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+
+	weekBegin := time.Date(now.Year(), now.Month(), now.Day()-weekday+1, 0, 0, 0, 0, now.Location())
+	weekEnd := time.Date(now.Year(), now.Month(), now.Day()-weekday+7, 23, 59, 59, 0, now.Location())
+	fmt.Printf("%v - %v\n", weekBegin, weekEnd)
+
+	today := 0
+	todayStartTime := 0
+	todayEndTime := 0
+
+	weekTotal := 0.0
+	workDaysInWeek := 0
+	monthTotal := 0.0
+	workDaysInMonth := 0
 
 	for _, cal := range list.Items {
 		// fmt.Printf("%s%#v\n\n", strings.Repeat("=", 100), cal)
 
-		// events, err := srv.Events.List(cal.Id).ShowDeleted(false).SingleEvents(true).TimeMin(monthBegin).TimeMax(monthEnd).OrderBy("startTime").Do()
-		events, err := srv.Events.List(cal.Id).ShowDeleted(false).SingleEvents(true).TimeMin(monthBegin).TimeMax(monthEnd).OrderBy("startTime").Do()
+		events, err := srv.Events.List(cal.Id).ShowDeleted(false).SingleEvents(true).TimeMin(monthBegin.Format(time.RFC3339)).TimeMax(monthEnd.Format(time.RFC3339)).OrderBy("startTime").Do()
 		if err != nil {
 			log.Fatalf("Unable to retrieve next ten of the user's events. %v", err)
 		}
@@ -150,15 +161,6 @@ func main() {
 			if !strings.HasPrefix(ev.Summary, "SolarWinds") {
 				continue
 			}
-
-			// If the DateTime is an empty string the Event is an all-day Event.
-			// So only Date is available.
-			// var when string
-			// if ev.Start.DateTime != "" {
-			// 	when = ev.Start.DateTime
-			// } else {
-			// 	when = ev.Start.Date
-			// }
 
 			// fmt.Printf("%s (%s)\n%#v\n", ev.Summary, when, ev)
 
@@ -172,9 +174,54 @@ func main() {
 				fmt.Println(err)
 			}
 
+			inWeek := false
+			inMonth := false
+
+			if startTime.Unix() > weekBegin.Unix() && endTime.Unix() < weekEnd.Unix() {
+				inWeek = true
+			}
+
+			if startTime.Unix() > monthBegin.Unix() && endTime.Unix() < monthEnd.Unix() {
+				inMonth = true
+			}
+
+			if startTime.Day() != today {
+				today = startTime.Day()
+
+				todayStartTime = 0
+				todayEndTime = 0
+
+				if inWeek {
+					workDaysInWeek += 1
+				}
+
+				if inMonth {
+					workDaysInMonth += 1
+				}
+			}
+
+			duration := endTime.Sub(startTime).Hours()
+
+			if inWeek {
+				weekTotal += duration
+			}
+
+			if inMonth {
+				monthTotal += duration
+			}
+
 			fmt.Printf("%#v\n", ev.Summary)
-			fmt.Printf("%#v\n", endTime.Sub(startTime).Hours())
+			fmt.Printf("%#v\n", duration)
 			fmt.Println()
 		}
 	}
+
+	_ = todayStartTime
+	_ = todayEndTime
+
+	weekTargetTotal := float64(workDaysInWeek * 8)
+	monthTargetTotal := float64(workDaysInMonth * 8)
+
+	fmt.Printf("week total: %v of %v (%+.2f)\n", weekTotal, weekTargetTotal, -(weekTargetTotal - weekTotal))
+	fmt.Printf("month total: %v of %v (%+.2f)\n", monthTotal, monthTargetTotal, -(monthTargetTotal - monthTotal))
 }
