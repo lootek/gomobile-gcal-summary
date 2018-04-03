@@ -1,5 +1,8 @@
 package main
 
+// https://github.com/google/google-api-go-client
+// https://godoc.org/google.golang.org/api/calendar/v3#EventsService
+
 import (
 	"encoding/json"
 	"fmt"
@@ -140,9 +143,9 @@ func main() {
 	weekEnd := time.Date(now.Year(), now.Month(), now.Day()-weekday+7, 23, 59, 59, 0, now.Location())
 	fmt.Printf("%v - %v\n", weekBegin, weekEnd)
 
+	var lastStartTime, lastEndTime time.Time
+
 	today := 0
-	todayStartTime := 0
-	todayEndTime := 0
 
 	weekTotal := 0.0
 	workDaysInWeek := 0
@@ -152,7 +155,8 @@ func main() {
 	for _, cal := range list.Items {
 		// fmt.Printf("%s%#v\n\n", strings.Repeat("=", 100), cal)
 
-		events, err := srv.Events.List(cal.Id).ShowDeleted(false).SingleEvents(true).TimeMin(monthBegin.Format(time.RFC3339)).TimeMax(monthEnd.Format(time.RFC3339)).OrderBy("startTime").Do()
+		// events, err := srv.Events.List(cal.Id).ShowDeleted(false).SingleEvents(true).TimeMin(monthBegin.Format(time.RFC3339)).TimeMax(monthEnd.Format(time.RFC3339)).OrderBy("startTime").Do()
+		events, err := srv.Events.List(cal.Id).ShowDeleted(false).SingleEvents(true).TimeMin(time.Date(now.Year(), 0, 0, 0, 0, 0, 0, now.Location()).Format(time.RFC3339)).TimeMax(monthEnd.Format(time.RFC3339)).OrderBy("startTime").Do()
 		if err != nil {
 			log.Fatalf("Unable to retrieve next ten of the user's events. %v", err)
 		}
@@ -161,8 +165,6 @@ func main() {
 			if !strings.HasPrefix(ev.Summary, "SolarWinds") {
 				continue
 			}
-
-			// fmt.Printf("%s (%s)\n%#v\n", ev.Summary, when, ev)
 
 			startTime, err := time.Parse(time.RFC3339, ev.Start.DateTime)
 			if err != nil {
@@ -185,11 +187,13 @@ func main() {
 				inMonth = true
 			}
 
+			duration := endTime.Sub(startTime).Hours()
+
 			if startTime.Day() != today {
 				today = startTime.Day()
 
-				todayStartTime = 0
-				todayEndTime = 0
+				lastStartTime = startTime
+				lastEndTime = endTime
 
 				if inWeek {
 					workDaysInWeek += 1
@@ -198,9 +202,9 @@ func main() {
 				if inMonth {
 					workDaysInMonth += 1
 				}
+				// } else if startTime.Unix() < lastEndTime.Unix() {
+				// 	duration = endTime.Sub(lastEndTime).Hours()
 			}
-
-			duration := endTime.Sub(startTime).Hours()
 
 			if inWeek {
 				weekTotal += duration
@@ -210,14 +214,12 @@ func main() {
 				monthTotal += duration
 			}
 
-			fmt.Printf("%#v\n", ev.Summary)
-			fmt.Printf("%#v\n", duration)
-			fmt.Println()
+			fmt.Printf("%v\t\t%v\t%v\n\n", startTime.Format(time.RFC1123), duration, ev.Summary)
 		}
 	}
 
-	_ = todayStartTime
-	_ = todayEndTime
+	_ = lastStartTime
+	_ = lastEndTime
 
 	weekTargetTotal := float64(workDaysInWeek * 8)
 	monthTargetTotal := float64(workDaysInMonth * 8)
